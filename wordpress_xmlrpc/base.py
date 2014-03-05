@@ -1,8 +1,36 @@
 import collections
 import sys
+import xmlrpclib
 
 from wordpress_xmlrpc.compat import xmlrpc_client, dict_type
 from wordpress_xmlrpc.exceptions import ServerConnectionError, UnsupportedXmlrpcMethodError, InvalidCredentialsError, XmlrpcDisabledError
+
+class ProxyTransport(xmlrpclib.Transport):
+	"""Provides an XMl-RPC transport routing via a http proxy.
+	
+	This is done by using urllib2, which in turn uses the environment
+	varable http_proxy and whatever else it is built to use (e.g. the
+	windows	registry).
+	
+	NOTE: the environment variable http_proxy should be set correctly.
+	"""
+
+	def request(self, host, handler, request_body, verbose):
+		import urllib2
+		self.verbose=verbose
+		url='http://'+host+handler
+		if self.verbose: "ProxyTransport URL: [%s]"%url
+
+		request = urllib2.Request(url)
+		request.add_data(request_body)
+		# Note: 'Host' and 'Content-Length' are added automatically
+		request.add_header("User-Agent", self.user_agent)
+		request.add_header("Content-Type", "text/xml") # Important
+
+		proxy_handler=urllib2.ProxyHandler()
+		opener=urllib2.build_opener(proxy_handler)
+		f=opener.open(request)
+		return(self.parse_response(f))
 
 
 class Client(object):
@@ -13,14 +41,14 @@ class Client(object):
     `XmlrpcMethod`-derived class to `Client`'s `call` method.
     """
 
-    def __init__(self, url, username, password, blog_id=0):
+    def __init__(self, url, username, password, blog_id=0, transport=None):
         self.url = url
         self.username = username
         self.password = password
         self.blog_id = blog_id
 
         try:
-            self.server = xmlrpc_client.ServerProxy(url, allow_none=True)
+            self.server = xmlrpc_client.ServerProxy(url, transport=ProxyTransport(), allow_none=True)
             self.supported_methods = self.server.mt.supportedMethods()
         except xmlrpc_client.ProtocolError:
             e = sys.exc_info()[1]
